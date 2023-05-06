@@ -1,0 +1,395 @@
+---
+title: "Group project (Advance Data mining and Predictive Analytics) - Group-8"
+output:
+  word_document: default
+  pdf_document: default
+date: "2023-05-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#Loading necessary poackages for current project:
+```{r}
+library(caret)
+library(glmnet)
+library(pls)
+library(dplyr)
+library(esquisse)
+library(ggplot2)
+library(randomForest)
+```
+
+#Loading train dataset:
+```{r}
+bank_model<-read.csv("train_v3.csv")
+```
+
+
+#Creating a default column based on, if loss is 0 then 0  and if loss is more than 0 then default is 1
+```{r}
+bank_model$default <- factor(ifelse(bank_model$loss > 0, 1, 0))
+
+bank_model$loss <- (bank_model$loss / 100)
+```
+
+#Checking the missing values in the data set:
+```{r}
+row_missing <- rowMeans(is.na(bank_model))
+
+min_missing_values<-min(row_missing)
+min_missing_values
+max_missing_values<-max(row_missing)
+max_missing_values
+```
+# we have maximum missing values in the dataset with percentage of 47%
+
+
+# Visualizations of the dataset:
+```{r}
+
+ggplot(bank_model, aes(x=factor(default))) +
+  geom_bar(stat="count", width=0.4, fill="blue") +
+  labs(title="Non-Default v/s Default") +
+  labs(x="", y="No. of Customers") +
+  theme(plot.title = element_text(hjust = 0.4)) +
+  geom_text(stat='count', aes(label=..count..), vjust=2)
+```
+
+
+#Removing the zero-variances variables and Preprocessing the dataset by removing highly correlated and imputing missing values using "corr" and "medianimpute":
+```{r}
+zero_var_indices <- nearZeroVar(bank_model[ ,-c(763,764)])
+
+data_cleaned <- bank_model[, -zero_var_indices]
+
+bank_preprocess <- preProcess(data_cleaned[ ,-c(739,740)], method = c("corr", "medianImpute"))
+
+new_bank_model <- predict(bank_preprocess, data_cleaned)
+```
+
+#Removing zero-variance,highly corr variables and imputed missing values : we have new data set "new_bank_model" with 248 attributes.
+
+
+
+#1.CLASSIFICATION MODEL:
+
+#We first need to run a classification model to classify how many customers are actually defaulting
+
+#We used Lasso and  Principle Component Analysis(PCA) for variable selection
+
+#a).Lasso Model: we now run the new_bank_model with 248 attributes for variable selection:
+```{r}
+set.seed(123)
+
+y <- as.vector(as.factor(new_bank_model$default))
+
+x <- data.matrix(new_bank_model[,-c(247,248)])
+
+lasso_model<- lasso_model<- cv.glmnet(x, y, alpha = 1,  preProcess = c("center", "scale"), family = "binomial", nfolds = 10, type.measure = "auc")
+
+plot(lasso_model)
+
+lasso_model$lambda.min
+```
+
+#Minimum Lambda value returned a total of 180 attributes out of 248 attributes:
+
+#We convert coefficients returned in lasso model into dataframe:
+```{r}
+# Return the coefficients for the lasso regression at the minimum lambda value:
+coef <- coef(lasso_model, s= "lambda.min")
+
+#Convert the coefficient values into a dataframe:
+new_bank_coef<- data.frame(name = coef@Dimnames[[1]][coef@i + 1], coefficient = coef@x)
+
+#Removing negatives values using "abs" function:
+new_bank_coef$coefficient <- abs(new_bank_coef$coefficient)
+
+#Re-arranging the data frame in decreasing order:
+new_bank_coef[order(new_bank_coef$coefficient, decreasing = TRUE), ]
+
+#Removing intercept columns returned from lasso model:
+new_bank_coef<- new_bank_coef[-1, ]
+
+#Converting the data frame to a vector:
+new_bank_coef<- as.vector(new_bank_coef$name)
+
+#Adding "default" column to the data frame:
+new_bank_coef<- c(new_bank_coef,"default")
+
+#Selecting attributes from original data set "new_bank_model" using coefficients returned from lasso model i.e., "new_bank_coef"
+bank_lasso<-select(new_bank_model, new_bank_coef)
+
+
+```
+
+
+
+
+
+#b). Principle Component Analysis (PCA): 
+
+#We have 180 variables returned from Lasso model that are stored in "bank_lasso". Now, we further process the variables using PCA.
+
+
+```{r}
+pca_model <- preProcess(bank_lasso[,-c(181)], method = c("center", "scale", "pca"), thresh = 0.80)
+
+pca_model_1<- predict(pca_model, bank_lasso)
+
+pca_model
+```
+#We have a threshold limit of 0.80 for PCA to ensure 80% of variance is captured. PCA captured 80% in 69 components.
+
+
+#We are adding default column from previous model to the PCA model:
+```{r}
+pca_model_1$default <- bank_lasso$default
+```
+
+
+#Creating a train and validation sets from the values returned in PCA model:
+```{r}
+set.seed(123)
+
+pca_index <- createDataPartition(pca_model_1$default, p = 0.80, list = FALSE)
+
+pca_train <- pca_model_1[pca_index, ]
+pca_validate <- pca_model_1[-pca_index, ] 
+
+```
+
+
+#Coverting the "default" column into factor in both train and validation sets:
+```{r}
+pca_train$default <- as.factor(pca_train$default)
+pca_validate$default <- as.factor(pca_validate$default)
+```
+
+
+#Now run the values returned from PCA in random forest model:
+```{r}
+set.seed(123)
+
+model_rf_pca <- randomForest(default ~ ., data = pca_train, mtry = 5)
+
+print(model_rf_pca)
+```
+
+
+
+
+```{r}
+pca_final <- data.frame(actual = pca_validate$default,predict(model_rf_pca, newdata = pca_validate, type = "prob"))
+
+pca_final$predict <- ifelse(pca_final$X0 > 0.60, 0, 1)
+
+pca <- confusionMatrix(as.factor(pca_final$predict), as.factor(pca_final$actual),positive='1')
+
+pca
+```
+
+
+
+#Laoding Test data set for predicting the defaulting customers: 
+```{r}
+pca_test <- read.csv("test__no_lossv3.csv")
+```
+
+#We are imputing missing values same as we did for train data set using medianimpute method:
+```{r}
+test_pca_1 <- preProcess(pca_test, method = c("medianImpute"))
+
+test_pca_process<- predict(test_pca_1, pca_test)
+
+```
+
+
+#Selecting attributes from test data set "test_pca_process" using coefficients returned from lasso model i.e., "new_bank_coef":
+```{r}
+test_pca_lasso<-select(test_pca_process, new_bank_coef[new_bank_coef!="default"])
+```
+
+
+#We are processing test model also in PCA to match our train model:
+```{r}
+set.seed(123)
+test_pca_model <- preProcess(test_pca_lasso, method = c("center", "scale", "pca"), thresh = 0.80)
+
+test_pca_model_1<- predict(pca_model, test_pca_lasso)
+```
+
+#Predicting the test_pca_model_1 using the random forest model "model_rf_pca":
+```{r}
+set.seed(123)
+predictions_pca <-data.frame(id=pca_test$id,predict(model_rf_pca, test_pca_model_1, type = "prob"))
+
+threshold <- 0.60
+predictions_pca$predicted_default <- ifelse(predictions_pca$X0 > threshold, 0, 1)
+```
+
+#Filtering the number defaulting customers that was predicting by our random forest model:
+```{r}
+predictions_pca_filtered<-predictions_pca %>% filter(predicted_default == 1)
+predictions_pca_filtered
+```
+
+#Based on the results our random forest model predicted 33 customer will default in the test data set.
+
+
+#We are binding our results from our classification model to our orginal test dataset:
+```{r}
+test_2<-pca_test
+test_2$predictions <- predictions_pca$predicted_default
+test_3<- test_2 %>% filter(predictions==1)
+
+```
+
+
+#2.REGRESSION MODEL:
+#We have classified our defaulting customers using classification above.
+#Now, we create a regression model, to predict loss by the defaulting customers from classification.
+
+#Laoding the train data set:
+```{r}
+new_train <- read.csv("train_v3.csv")
+```
+
+#filtering all the non-defaulting customers from the train data set:
+```{r}
+new_train_1 <- new_train %>% filter(loss!=0) 
+new_train_1$loss<- (new_train_1$loss / 100)
+```
+
+##Removing the zero-variances variables and Preprocessing the dataset by removing highly correlated and imputing missing values using "corr" and "medianimpute":
+```{r}
+zero_var_indices_1 <- nearZeroVar(new_train_1[ ,-c(763)])
+
+train_model <- new_train_1[, -zero_var_indices_1]
+
+new_train_3 <- preProcess(train_model[ ,-c(748)], method = c("medianImpute", "corr"))
+
+new_train_4 <- predict(new_train_3, train_model)
+```
+
+
+#Lasso model: we are using lasso model for variable selection for the dataset "new_train_4" consisting of 252 attributes:
+```{r}
+set.seed(123)
+x_1 <- as.matrix(new_train_4[ ,-c(252)])
+y_2 <- as.vector(new_train_4$loss)
+
+model_lasso <- cv.glmnet(x_1, y_2, alpha = 1, family = "gaussian", nfolds = 10, type.measure = "mse")
+
+plot(model_lasso)
+
+model_lasso$lambda.min
+```
+
+
+#We convert coefficients returned in lasso model into dataframe:
+```{r}
+# Return the coefficients for the lasso regression at the minimum lambda value:
+coef_test <- coef(model_lasso, s= "lambda.min")
+
+#Convert the coefficient values into a data frame:
+coef_test<- data.frame(name = coef_test@Dimnames[[1]][coef_test@i + 1], coefficient = coef_test@x)
+
+#Removing negatives values using "abs" function:
+coef_test$coefficient <- abs(coef_test$coefficient)
+
+#Re-arranging the data frame in decreasing order:
+coef_test[order(coef_test$coefficient, decreasing = TRUE), ]
+
+#Removing intercept columns returned from lasso model:
+coef_test<- coef_test[-1, ]
+
+#Converting the data frame to a vector:
+coef_test<- as.vector(coef_test$name)
+
+#Adding "loss" column to the data frame:
+coef_test<- c(coef_test,"loss")
+
+
+#Selecting attributes from original data set "new_train_4" using coefficients returned from lasso model i.e., "coef_test"
+final_model<-select(new_train_4, coef_test)
+```
+
+
+##Creating a train and validation sets from lasso model dataset "final_model":
+```{r}
+set.seed(123)
+
+bank_index_1 <- createDataPartition(final_model$loss, p = 0.80, list = FALSE)
+
+bank_train_1 <- final_model[bank_index_1, ]
+bank_validate_1 <- final_model[-bank_index_1, ]
+```
+
+
+#Creating a ridge model on the train data set from above:
+```{r}
+x_3 <- as.matrix(bank_train_1[ ,-c(121)])
+y_3 <- as.vector(bank_train_1$loss)
+
+ridge_model<- cv.glmnet(x_3, y_3, alpha = 0, family = "gaussian", nfolds = 10, type.measure = "mae")
+```
+
+
+```{r}
+plot(ridge_model)
+
+ridge_model$lambda.min
+
+coef_final <- coef(ridge_model, s = "lambda.min")
+```
+
+## validating the Ridge model using "bank_validate_1" using "MAE" metrics:
+```{r}
+x_4 <- as.matrix(bank_validate_1[ ,-c(121)])
+y_4 <- as.vector(bank_validate_1$loss)
+
+predicted_loss <- predict(ridge_model, s = ridge_model$lambda.min, newx = x_4)
+
+## Evaluating Performance.
+
+mae <- mean(abs((predicted_loss - y_4)))
+mae_final <- cbind(y_4,predicted_loss)
+
+print(mae)
+```
+
+#Selecting attributes from original data set "test_3" using coefficients returned from lasso model i.e., "coef_test"
+```{r}
+predict_9595<-select(test_3, coef_test[coef_test!="loss"])
+```
+
+#Imputing missing values in updated dataset "predict_9595":
+```{r}
+set.seed(123)
+final_preprocess <- preProcess(predict_9595, method = c("medianImpute"))
+
+final_preprocess_1 <- predict(final_preprocess, predict_9595)
+```
+
+#Predciting loss using ridge model by defaulting customers:
+```{r}
+default_loss<-as.data.frame(round(abs(predict(ridge_model, s = ridge_model$lambda.min, newx = as.matrix(final_preprocess_1)))*100))
+```
+
+#Storing loss given default values into a csv file:
+```{r}
+loss_given_default <- cbind.data.frame(predictions_pca_filtered, default_loss)
+
+s<-left_join(predictions_pca,loss_given_default,by='id')
+
+s$loss <- ifelse(s$predicted_default.x==0,0,s$s1)
+
+final_predicted_file<-data.frame(id=s$id,loss=s$loss)
+
+write.csv(final_predicted_file, "final_predicted_file.csv")
+```
+
