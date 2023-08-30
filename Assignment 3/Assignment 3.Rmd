@@ -1,0 +1,70 @@
+---
+title: "Assignment 3"
+output:
+  word_document: default
+  pdf_document: default
+date: "2023-04-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ISLR)
+library(glmnet)
+library(caret)
+library(dplyr)
+library(kernlab)
+library(neuralnet)
+```
+
+#Filtering variables for current project:
+```{r}
+carseats <- Carseats %>% select("Sales", "Price", "Advertising","Population","Age","Income","Education")
+```
+
+#QB1.Build a linear SVM regression model to predict Sales based on all other attributes
+```{r}
+set.seed(123)
+model_1<- train(Sales~.,data=carseats, method= "svmLinear")
+print(model_1)
+
+
+#The values of C is "1" and R-squared values is 0.3462025. 
+```
+
+#QB2. Customize the search grid by checking the model’s performance for C parameter of 0.1,.5,1 and 10 using 2 repeats of 5-fold cross validation.
+```{r}
+set.seed(123)
+model_2 <- trainControl(method = "repeatedcv", number = 5, repeats = 2)
+model_3 <- expand.grid(C = c(0.1, 0.5, 1, 10))
+
+model_4<- train(Sales~., data = carseats, method = "svmLinear", trControl= model_2, preProcess = c("center", "scale"), tuneGrid = model_3, tuneLength = 10)  
+model_4
+
+#The best C for combination of 0.1, 0.5, 1, 10 is 0.5, R-squared being 0.3466721.
+```
+
+
+#QB3.Train a neural network model to predict Sales based on all other attributes
+```{r}
+set.seed(123)
+model_6<- train(Sales~., data = carseats, method = "nnet", preProcess = c("center", "scale"),linout = TRUE, trace = FALSE)
+model_6
+```
+
+#QB4.What will be the estimated Sales for this record using the above neuralnet model? 
+```{r}
+new_carseats<- data.frame("Price" = 6.54, "Population" = 124, "Advertising" = 0, "Age" = 76, "Income" = 110, "Education" = 10)
+
+model_7<- predict(model_6, new_carseats)
+model_7
+
+#The estimated Sales for current data frame, using nnet model would be 11.46014.
+```
+
+
+
+
+
