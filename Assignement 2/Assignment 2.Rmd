@@ -1,0 +1,70 @@
+---
+title: "Assignment 2"
+output:
+  word_document: default
+  pdf_document: default
+date: "2023-04-07"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(ISLR)
+library(glmnet)
+library(caret)
+library(dplyr)
+library(rpart)
+library(rattle)
+library(rpart.plot)
+library(randomForest)
+```
+
+
+#Loading and selecting required columns from ISLR carseats dataset.
+```{r}
+carseats <- Carseats %>% select("Sales", "Price", "Advertising","Population","Age","Income","Education")
+```
+
+#1.Predicting Sales based on all attributes.
+```{r}
+model_1<- rpart(Sales~., data = carseats, method = "anova")
+print(model_1)
+rpart.plot(model_1)
+
+#The attributes used at the top of Tree are Price, Advertising, Age.
+```
+
+#2.What will be the estimated Sales for this record using the decision tree model?
+```{r}
+new_carseats<- data.frame("Sales" = 9, "Price" = 6.54, "Population" = 124, "Advertising" = 0, "Age" = 76, "Income" = 110, "Education" = 10)
+model_2<- predict(model_1, new_carseats, method = "anova")
+model_2
+
+#The estimated Sales for this record is predicted by the Decision Tree model is 9.58625.
+```
+
+
+#3.Using Caret function to train a random forest model.
+```{r}
+set.seed(123)
+model_3<- train(Sales~.,data=carseats, method= "rf")
+print(model_3)
+
+#The best performance of mtry value when using method ="rf"  is 2, as the RMSE is 2.404492.
+```
+
+
+#4.Customizing the search grid by checking the model's performance for mtry values of 2, 3, 5 and 3-repeats of 5-fold cross validation.
+```{r}
+set.seed(123)
+model_4 <- trainControl(method = "repeatedcv", number = 5, repeats = 3,search 
+= "grid")
+model_5 <- train(Sales~., data = carseats, method = "rf",trControl = model_4,tuneGrid = expand.grid(mtry=c(2,3,5)))
+model_5
+
+##The best performance of mtry value when using method ="rf"  is 2,3,5 is 3, as the RMSE is 2.401365.
+```
+
